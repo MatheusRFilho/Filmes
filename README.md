@@ -1,57 +1,48 @@
 # Cine a Dois
 
-Lista compartilhada de filmes e séries — Next.js + Supabase Auth + TMDB.
+Lista compartilhada de filmes e séries — Next.js + Supabase + TMDB.
 
-## O que faz
-
-- Login com **usuário e senha** (cada um com a própria conta)
-- Criar conta com código de convite (`ACCESS_PIN`)
-- Busca TMDB (capa + sinopse)
-- Lista no Supabase com sync em tempo real
-- Adicionar, remover, marcar assistido, quem sugeriu, filtros
+Login com **usuário e senha** (sem e-mail, sem service_role).
 
 ## Setup
 
 ### 1. Env
 
 ```bash
-npm install
+yarn install
 cp .env.example .env
 ```
 
+Preencha o **`.env`**:
+
 | Variável | Uso |
 |---|---|
-| `NEXT_PUBLIC_SUPABASE_URL` | Project URL (Settings → API Keys) |
-| `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | **Publishable key** (mesma tela). Se o app pedir a chave antiga, use a aba **Legacy API Keys** → `anon` em `NEXT_PUBLIC_SUPABASE_ANON_KEY` |
+| `NEXT_PUBLIC_SUPABASE_URL` | Project URL |
+| `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | Publishable key |
+| `SESSION_SECRET` | String longa para o cookie de sessão |
 | `TMDB_API_KEY` | API do TMDB |
-| `ACCESS_PIN` | código só para **criar conta** |
+| `ACCESS_PIN` | Código só para **criar conta** |
 
-> Não use `service_role` nem secret key no frontend — só no servidor, e este projeto não precisa delas.
+### 2. Banco (migrations)
 
-### 2. SQL no Supabase
+Não rode o schema inteiro a cada mudança. Veja [`supabase/migrations/README.md`](supabase/migrations/README.md).
 
-Rode [`supabase/schema.sql`](supabase/schema.sql) no SQL Editor.
+- **Projeto novo:** rode no SQL Editor `supabase/migrations/20260923100000_init.sql`
+- **Já tinha o schema:** rode `20260923100100_mark_existing_as_migrated.sql`
+- **Mudança nova:**
 
-### 3. Auth do Supabase (importante)
+```bash
+yarn db:migration:new minha_mudanca
+```
 
-Em **Authentication → Providers → Email**:
+Depois cole **só** o arquivo novo no SQL Editor.
 
-- Ative Email
-- **Desative** “Confirm email” (usamos e-mail interno `usuario@cineadois.local`)
+### 3. Rodar
 
-### 4. Criar as contas
+```bash
+yarn dev
+```
 
-1. `npm run dev`
-2. Abra o site → **Criar conta**
-3. Usuário (ex: `matheus`), senha, nome na lista, código = `ACCESS_PIN`
-4. Repita para a Aline (`aline`)
-
-Depois é só **Entrar** com usuário e senha.
-
-### 5. Deploy
-
-Na Vercel, configure as mesmas variáveis do `.env`.
-
-## Observação
-
-O Supabase Auth exige e-mail por baixo dos panos. O app converte `matheus` → `matheus@cineadois.local` automaticamente — vocês só digitam o username.
+1. Abra http://localhost:3000  
+2. **Criar conta** com usuário, senha e código de convite  
+3. Depois **Entrar**

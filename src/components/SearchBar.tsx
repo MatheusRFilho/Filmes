@@ -2,6 +2,7 @@
 
 import Image from "next/image";
 import { useEffect, useRef, useState } from "react";
+import { ManualAddForm } from "@/components/ManualAddForm";
 import { posterUrl } from "@/lib/constants";
 import type { TmdbSearchResult } from "@/lib/types";
 
@@ -20,23 +21,19 @@ export function SearchBar({
 }: SearchBarProps) {
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<TmdbSearchResult[]>([]);
-  const [suggestedBy, setSuggestedBy] = useState(defaultSuggestedBy);
+  const [suggestedByOverride, setSuggestedByOverride] = useState<string | null>(
+    null,
+  );
+  const suggestedBy = suggestedByOverride ?? defaultSuggestedBy;
   const [loading, setLoading] = useState(false);
   const [addingKey, setAddingKey] = useState<string | null>(null);
   const [error, setError] = useState("");
+  const [manualOpen, setManualOpen] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
-
-  useEffect(() => {
-    if (defaultSuggestedBy) {
-      setSuggestedBy(defaultSuggestedBy);
-    }
-  }, [defaultSuggestedBy]);
 
   useEffect(() => {
     const q = query.trim();
     if (q.length < 2) {
-      setResults([]);
-      setError("");
       return;
     }
 
@@ -87,11 +84,25 @@ export function SearchBar({
       setQuery("");
       setResults([]);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Falha ao adicionar");
+      const message =
+        err instanceof Error
+          ? err.message
+          : err && typeof err === "object" && "message" in err
+            ? String((err as { message: unknown }).message)
+            : "Falha ao adicionar";
+      setError(message || "Falha ao adicionar");
     } finally {
       setAddingKey(null);
     }
   }
+
+  const trimmedQuery = query.trim();
+  const searchActive = trimmedQuery.length >= 2;
+  const visibleResults = searchActive ? results : [];
+  const visibleError = searchActive ? error : "";
+  const visibleLoading = searchActive && loading;
+  const searchedEmpty =
+    searchActive && !visibleLoading && visibleResults.length === 0 && !visibleError;
 
   return (
     <section className="search-section">
@@ -111,7 +122,7 @@ export function SearchBar({
           <span>Quem sugeriu</span>
           <select
             value={suggestedBy}
-            onChange={(e) => setSuggestedBy(e.target.value)}
+            onChange={(e) => setSuggestedByOverride(e.target.value)}
           >
             {names.map((name) => (
               <option key={name} value={name}>
@@ -122,12 +133,25 @@ export function SearchBar({
         </label>
       </div>
 
-      {loading ? <p className="muted">Buscando…</p> : null}
-      {error ? <p className="form-error">{error}</p> : null}
+      {visibleLoading ? <p className="muted">Buscando…</p> : null}
+      {visibleError ? <p className="form-error">{visibleError}</p> : null}
 
-      {results.length > 0 ? (
+      {searchedEmpty && !manualOpen ? (
+        <p className="muted search-empty-hint">
+          Não achou no TMDB?{" "}
+          <button
+            type="button"
+            className="link-btn"
+            onClick={() => setManualOpen(true)}
+          >
+            Adicionar manualmente
+          </button>
+        </p>
+      ) : null}
+
+      {visibleResults.length > 0 ? (
         <ul className="search-results">
-          {results.map((result) => {
+          {visibleResults.map((result) => {
             const key = `${result.mediaType}:${result.tmdbId}`;
             const already = existingKeys.has(key);
             const poster = posterUrl(result.posterPath, "w185");
@@ -152,6 +176,9 @@ export function SearchBar({
                   <span>
                     {result.mediaType === "tv" ? "Série" : "Filme"}
                     {result.year ? ` · ${result.year}` : ""}
+                    {result.genres.length > 0
+                      ? ` · ${result.genres.slice(0, 2).join(", ")}`
+                      : ""}
                   </span>
                 </div>
                 <button
@@ -170,6 +197,15 @@ export function SearchBar({
             );
           })}
         </ul>
+      ) : null}
+
+      {manualOpen ? (
+        <ManualAddForm
+          names={names}
+          defaultSuggestedBy={defaultSuggestedBy}
+          onAdd={onAdd}
+          onClose={() => setManualOpen(false)}
+        />
       ) : null}
     </section>
   );

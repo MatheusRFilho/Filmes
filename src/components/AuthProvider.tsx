@@ -9,20 +9,11 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import type { Session, User } from "@supabase/supabase-js";
-import {
-  isValidUsername,
-  normalizeUsername,
-  usernameToEmail,
-} from "@/lib/constants";
-import { fetchProfile, fetchProfiles } from "@/lib/profiles";
-import { getSupabase, isSupabaseConfigured } from "@/lib/supabase";
+import { isValidUsername, normalizeUsername } from "@/lib/constants";
 import type { Profile } from "@/lib/types";
 
 type AuthContextValue = {
   ready: boolean;
-  session: Session | null;
-  user: User | null;
   profile: Profile | null;
   profiles: Profile[];
   signIn: (username: string, password: string) => Promise<void>;
@@ -38,49 +29,48 @@ type AuthContextValue = {
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
+async function readAuthPayload(): Promise<{
+  profile: Profile | null;
+  profiles: Profile[];
+}> {
+  const response = await fetch("/api/auth/me", { cache: "no-store" });
+  const data = (await response.json()) as {
+    profile?: Profile | null;
+    profiles?: Profile[];
+    error?: string;
+  };
+  if (!response.ok) {
+    throw new Error(data.error || "Falha ao carregar sessão");
+  }
+  return {
+    profile: data.profile ?? null,
+    profiles: data.profiles ?? [],
+  };
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [ready, setReady] = useState(false);
-  const [session, setSession] = useState<Session | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
   const [profiles, setProfiles] = useState<Profile[]>([]);
 
-  const loadProfileData = useCallback(async (userId: string | undefined) => {
-    if (!userId || !isSupabaseConfigured()) {
-      setProfile(null);
-      setProfiles([]);
-      return;
-    }
-
-    const [mine, all] = await Promise.all([
-      fetchProfile(userId),
-      fetchProfiles(),
-    ]);
-    setProfile(mine);
-    setProfiles(all);
+  const refreshProfiles = useCallback(async () => {
+    const data = await readAuthPayload();
+    setProfile(data.profile);
+    setProfiles(data.profiles);
   }, []);
 
   useEffect(() => {
-    if (!isSupabaseConfigured()) {
-      setReady(true);
-      return;
-    }
-
-    const supabase = getSupabase();
-
-    supabase.auth.getSession().then(({ data }) => {
-      setSession(data.session);
-      void loadProfileData(data.session?.user.id).finally(() => setReady(true));
-    });
-
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, nextSession) => {
-      setSession(nextSession);
-      void loadProfileData(nextSession?.user.id);
-    });
-
-    return () => subscription.unsubscribe();
-  }, [loadProfileData]);
+    void readAuthPayload()
+      .then((data) => {
+        setProfile(data.profile);
+        setProfiles(data.profiles);
+      })
+      .catch(() => {
+        setProfile(null);
+        setProfiles([]);
+      })
+      .finally(() => setReady(true));
+  }, []);
 
   const signIn = useCallback(async (username: string, password: string) => {
     const normalized = normalizeUsername(username);
@@ -88,12 +78,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       throw new Error("Usuário inválido (3–20 letras, números ou _).");
     }
 
-    const { error } = await getSupabase().auth.signInWithPassword({
-      email: usernameToEmail(normalized),
-      password,
+    const response = await fetch("/api/auth/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username: normalized, password }),
     });
+    const data = (await response.json()) as {
+      profile?: Profile;
+      error?: string;
+    };
+    if (!response.ok) {
+      throw new Error(data.error || "Falha ao entrar");
+    }
 
-    if (error) throw error;
+    setProfile(data.profile ?? null);
+    const me = await readAuthPayload();
+    setProfiles(me.profiles);
   }, []);
 
   const signUp = useCallback(
@@ -111,53 +111,40 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         throw new Error("A senha precisa ter pelo menos 6 caracteres.");
       }
 
-      const inviteResponse = await fetch("/api/invite", {
+      const response = await fetch("/api/auth/register", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ code: inviteCode }),
+        body: JSON.stringify({
+          username: normalized,
+          password,
+          displayName,
+          inviteCode,
+        }),
       });
-      const inviteData = (await inviteResponse.json()) as {
-        ok?: boolean;
+      const data = (await response.json()) as {
+        profile?: Profile;
         error?: string;
       };
-      if (!inviteResponse.ok || !inviteData.ok) {
-        throw new Error(inviteData.error || "Código de convite inválido");
+      if (!response.ok) {
+        throw new Error(data.error || "Falha ao criar conta");
       }
 
-      const name = displayName.trim() || normalized;
-      const { error } = await getSupabase().auth.signUp({
-        email: usernameToEmail(normalized),
-        password,
-        options: {
-          data: {
-            username: normalized,
-            display_name: name,
-          },
-        },
-      });
-
-      if (error) throw error;
+      setProfile(data.profile ?? null);
+      const me = await readAuthPayload();
+      setProfiles(me.profiles);
     },
     [],
   );
 
   const signOut = useCallback(async () => {
-    const { error } = await getSupabase().auth.signOut();
-    if (error) throw error;
+    await fetch("/api/auth/logout", { method: "POST" });
     setProfile(null);
     setProfiles([]);
   }, []);
 
-  const refreshProfiles = useCallback(async () => {
-    if (!session?.user.id) return;
-    await loadProfileData(session.user.id);
-  }, [loadProfileData, session?.user.id]);
-
   const value = useMemo<AuthContextValue>(
     () => ({
       ready,
-      session,
-      user: session?.user ?? null,
       profile,
       profiles,
       signIn,
@@ -165,16 +152,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       signOut,
       refreshProfiles,
     }),
-    [
-      ready,
-      session,
-      profile,
-      profiles,
-      signIn,
-      signUp,
-      signOut,
-      refreshProfiles,
-    ],
+    [ready, profile, profiles, signIn, signUp, signOut, refreshProfiles],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

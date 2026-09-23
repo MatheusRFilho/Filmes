@@ -8,6 +8,7 @@ export type WatchItem = {
   posterPath: string | null;
   overview: string;
   year: string;
+  genres: string[];
   suggestedBy: string;
   watched: boolean;
   createdAt: number;
@@ -26,8 +27,8 @@ export type TmdbSearchResult = {
   posterPath: string | null;
   overview: string;
   year: string;
+  genres: string[];
 };
 
-export type StatusFilter = "all" | "pending" | "watched";
 export type MediaFilter = "all" | MediaType;
 export type SuggestedFilter = "all" | string;

@@ -8,7 +8,9 @@ type NewItemInput = {
   posterPath: string | null;
   overview: string;
   year: string;
+  genres: string[];
   suggestedBy: string;
+  createdBy?: string | null;
 };
 
 type ItemRow = {
@@ -19,10 +21,27 @@ type ItemRow = {
   poster_path: string | null;
   overview: string | null;
   year: string | null;
+  genres?: string[] | null;
   suggested_by: string;
   watched: boolean;
   created_at: string;
 };
+
+function throwDbError(error: unknown): never {
+  if (error instanceof Error) throw error;
+  if (error && typeof error === "object" && "message" in error) {
+    const message = String((error as { message?: string }).message || "");
+    const details = String((error as { details?: string }).details || "");
+    const hint = String((error as { hint?: string }).hint || "");
+    const code = String((error as { code?: string }).code || "");
+    throw new Error(
+      [message, details, hint, code ? `(${code})` : ""]
+        .filter(Boolean)
+        .join(" — "),
+    );
+  }
+  throw new Error("Falha ao acessar o banco");
+}
 
 function mapRow(row: ItemRow): WatchItem {
   return {
@@ -33,6 +52,7 @@ function mapRow(row: ItemRow): WatchItem {
     posterPath: row.poster_path ?? null,
     overview: row.overview ?? "",
     year: row.year ?? "",
+    genres: Array.isArray(row.genres) ? row.genres : [],
     suggestedBy: row.suggested_by ?? "",
     watched: Boolean(row.watched),
     createdAt: row.created_at ? new Date(row.created_at).getTime() : Date.now(),
@@ -45,7 +65,7 @@ async function fetchItems(): Promise<WatchItem[]> {
     .select("*")
     .order("created_at", { ascending: false });
 
-  if (error) throw error;
+  if (error) throwDbError(error);
   return ((data as ItemRow[]) ?? []).map(mapRow);
 }
 
@@ -59,8 +79,13 @@ export function subscribeItems(
     .then((items) => {
       if (active) onChange(items);
     })
-    .catch((error: Error) => {
-      if (active) onError?.(error);
+    .catch((error: unknown) => {
+      if (!active) return;
+      try {
+        throwDbError(error);
+      } catch (err) {
+        onError?.(err as Error);
+      }
     });
 
   const channel = getSupabase()
@@ -73,8 +98,13 @@ export function subscribeItems(
           .then((items) => {
             if (active) onChange(items);
           })
-          .catch((error: Error) => {
-            if (active) onError?.(error);
+          .catch((error: unknown) => {
+            if (!active) return;
+            try {
+              throwDbError(error);
+            } catch (err) {
+              onError?.(err as Error);
+            }
           });
       },
     )
@@ -91,24 +121,32 @@ export function subscribeItems(
 }
 
 export async function addItem(input: NewItemInput): Promise<void> {
-  const supabase = getSupabase();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
-  const { error } = await supabase.from("items").insert({
+  // Não enviamos created_by no insert do browser:
+  // a FK antiga apontando para auth.users gerava 409 Conflict.
+  // "suggested_by" já guarda quem sugeriu.
+  const { error } = await getSupabase().from("items").insert({
     tmdb_id: input.tmdbId,
     media_type: input.mediaType,
     title: input.title,
     poster_path: input.posterPath,
     overview: input.overview,
     year: input.year,
+    genres: input.genres,
     suggested_by: input.suggestedBy,
     watched: false,
-    created_by: user?.id ?? null,
   });
 
-  if (error) throw error;
+  if (error) {
+    const code = "code" in error ? String(error.code) : "";
+    if (code === "23505" || code === "23503") {
+      throw new Error(
+        code === "23505"
+          ? "Esse título já está na lista."
+          : "Conflito ao salvar (FK). Rode a migration de correção do items.",
+      );
+    }
+    throwDbError(error);
+  }
 }
 
 export async function setWatched(id: string, watched: boolean): Promise<void> {
@@ -117,10 +155,10 @@ export async function setWatched(id: string, watched: boolean): Promise<void> {
     .update({ watched })
     .eq("id", id);
 
-  if (error) throw error;
+  if (error) throwDbError(error);
 }
 
 export async function removeItem(id: string): Promise<void> {
   const { error } = await getSupabase().from("items").delete().eq("id", id);
-  if (error) throw error;
+  if (error) throwDbError(error);
 }

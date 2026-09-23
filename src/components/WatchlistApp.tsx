@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { AuthScreen } from "@/components/AuthScreen";
 import { useAuth } from "@/components/AuthProvider";
 import { Filters } from "@/components/Filters";
@@ -10,35 +10,32 @@ import { addItem, removeItem, setWatched, subscribeItems } from "@/lib/items";
 import { isSupabaseConfigured } from "@/lib/supabase";
 import type {
   MediaFilter,
-  StatusFilter,
   SuggestedFilter,
   TmdbSearchResult,
   WatchItem,
 } from "@/lib/types";
 
 export function WatchlistApp() {
-  const { ready, session, profile, profiles, signOut, refreshProfiles } =
-    useAuth();
+  const { ready, profile, profiles, signOut } = useAuth();
   const [items, setItems] = useState<WatchItem[]>([]);
   const [listError, setListError] = useState("");
   const [busyId, setBusyId] = useState<string | null>(null);
-  const [status, setStatus] = useState<StatusFilter>("all");
   const [media, setMedia] = useState<MediaFilter>("all");
   const [suggestedBy, setSuggestedBy] = useState<SuggestedFilter>("all");
 
   useEffect(() => {
-    if (!session || !isSupabaseConfigured()) return;
-
-    setListError("");
-    void refreshProfiles();
+    if (!profile || !isSupabaseConfigured()) return;
 
     const unsubscribe = subscribeItems(
-      (next) => setItems(next),
+      (next) => {
+        setItems(next);
+        setListError("");
+      },
       (error) => setListError(error.message),
     );
 
     return () => unsubscribe();
-  }, [session, refreshProfiles]);
+  }, [profile]);
 
   const nameOptions = useMemo(() => {
     const fromProfiles = profiles.map((p) => p.displayName);
@@ -53,13 +50,21 @@ export function WatchlistApp() {
 
   const filtered = useMemo(() => {
     return items.filter((item) => {
-      if (status === "pending" && item.watched) return false;
-      if (status === "watched" && !item.watched) return false;
       if (media !== "all" && item.mediaType !== media) return false;
       if (suggestedBy !== "all" && item.suggestedBy !== suggestedBy) return false;
       return true;
     });
-  }, [items, status, media, suggestedBy]);
+  }, [items, media, suggestedBy]);
+
+  const pendingItems = useMemo(
+    () => filtered.filter((item) => !item.watched),
+    [filtered],
+  );
+
+  const watchedItems = useMemo(
+    () => filtered.filter((item) => item.watched),
+    [filtered],
+  );
 
   async function handleAdd(result: TmdbSearchResult, who: string) {
     if (!isSupabaseConfigured()) {
@@ -72,6 +77,7 @@ export function WatchlistApp() {
       posterPath: result.posterPath,
       overview: result.overview,
       year: result.year,
+      genres: result.genres,
       suggestedBy: who,
     });
   }
@@ -103,7 +109,7 @@ export function WatchlistApp() {
     return <div className="boot">Carregando…</div>;
   }
 
-  if (!session) {
+  if (!profile) {
     return <AuthScreen />;
   }
 
@@ -119,7 +125,7 @@ export function WatchlistApp() {
             className="btn-ghost compact"
             onClick={() => void signOut()}
           >
-            Sair{profile ? ` (${profile.displayName})` : ""}
+            Sair ({profile.displayName})
           </button>
         </div>
         <h1 className="brand">Cine a Dois</h1>
@@ -140,24 +146,22 @@ export function WatchlistApp() {
         onAdd={handleAdd}
         existingKeys={existingKeys}
         names={nameOptions}
-        defaultSuggestedBy={profile?.displayName ?? nameOptions[0] ?? ""}
+        defaultSuggestedBy={profile.displayName}
       />
 
       <section className="list-section">
         <div className="list-header">
           <h2>Nossa lista</h2>
           <p className="muted">
-            {filtered.length} de {items.length} título
-            {items.length === 1 ? "" : "s"}
+            {pendingItems.length} na fila · {watchedItems.length} assistido
+            {watchedItems.length === 1 ? "" : "s"}
           </p>
         </div>
 
         <Filters
-          status={status}
           media={media}
           suggestedBy={suggestedBy}
           names={nameOptions}
-          onStatusChange={setStatus}
           onMediaChange={setMedia}
           onSuggestedChange={setSuggestedBy}
         />
@@ -171,19 +175,71 @@ export function WatchlistApp() {
               : "Nenhum título combina com esses filtros."}
           </p>
         ) : (
-          <div className="item-list">
-            {filtered.map((item) => (
-              <ItemCard
-                key={item.id}
-                item={item}
-                busy={busyId === item.id}
-                onToggleWatched={handleToggle}
-                onRemove={handleRemove}
-              />
-            ))}
-          </div>
+          <>
+            <ItemGroup
+              title="Para assistir"
+              count={pendingItems.length}
+              empty="Nenhum título pendente."
+              tone="pending"
+            >
+              {pendingItems.map((item) => (
+                <ItemCard
+                  key={item.id}
+                  item={item}
+                  busy={busyId === item.id}
+                  onToggleWatched={handleToggle}
+                  onRemove={handleRemove}
+                />
+              ))}
+            </ItemGroup>
+
+            <ItemGroup
+              title="Já assistimos"
+              count={watchedItems.length}
+              empty="Ainda não marcaram nenhum como assistido."
+              tone="watched"
+            >
+              {watchedItems.map((item) => (
+                <ItemCard
+                  key={item.id}
+                  item={item}
+                  busy={busyId === item.id}
+                  onToggleWatched={handleToggle}
+                  onRemove={handleRemove}
+                />
+              ))}
+            </ItemGroup>
+          </>
         )}
       </section>
+    </div>
+  );
+}
+
+function ItemGroup({
+  title,
+  count,
+  empty,
+  tone,
+  children,
+}: {
+  title: string;
+  count: number;
+  empty: string;
+  tone: "pending" | "watched";
+  children: ReactNode;
+}) {
+  return (
+    <div className={`item-group tone-${tone}`}>
+      <div className="item-group-header">
+        <h3>{title}</h3>
+        <span className="item-group-count">{count}</span>
+      </div>
+      {count === 0 ? (
+        <p className="group-empty">{empty}</p>
+      ) : (
+        <div className="item-list">{children}</div>
+      )}
     </div>
   );
 }
