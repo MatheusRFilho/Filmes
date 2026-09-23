@@ -1,36 +1,57 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Cine a Dois
 
-## Getting Started
+Lista compartilhada de filmes e séries — Next.js + Supabase Auth + TMDB.
 
-First, run the development server:
+## O que faz
+
+- Login com **usuário e senha** (cada um com a própria conta)
+- Criar conta com código de convite (`ACCESS_PIN`)
+- Busca TMDB (capa + sinopse)
+- Lista no Supabase com sync em tempo real
+- Adicionar, remover, marcar assistido, quem sugeriu, filtros
+
+## Setup
+
+### 1. Env
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+npm install
+cp .env.example .env
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+| Variável | Uso |
+|---|---|
+| `NEXT_PUBLIC_SUPABASE_URL` | Project URL (Settings → API Keys) |
+| `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | **Publishable key** (mesma tela). Se o app pedir a chave antiga, use a aba **Legacy API Keys** → `anon` em `NEXT_PUBLIC_SUPABASE_ANON_KEY` |
+| `TMDB_API_KEY` | API do TMDB |
+| `ACCESS_PIN` | código só para **criar conta** |
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+> Não use `service_role` nem secret key no frontend — só no servidor, e este projeto não precisa delas.
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+### 2. SQL no Supabase
 
-## Learn More
+Rode [`supabase/schema.sql`](supabase/schema.sql) no SQL Editor.
 
-To learn more about Next.js, take a look at the following resources:
+### 3. Auth do Supabase (importante)
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+Em **Authentication → Providers → Email**:
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+- Ative Email
+- **Desative** “Confirm email” (usamos e-mail interno `usuario@cineadois.local`)
 
-## Deploy on Vercel
+### 4. Criar as contas
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+1. `npm run dev`
+2. Abra o site → **Criar conta**
+3. Usuário (ex: `matheus`), senha, nome na lista, código = `ACCESS_PIN`
+4. Repita para a Aline (`aline`)
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Depois é só **Entrar** com usuário e senha.
+
+### 5. Deploy
+
+Na Vercel, configure as mesmas variáveis do `.env`.
+
+## Observação
+
+O Supabase Auth exige e-mail por baixo dos panos. O app converte `matheus` → `matheus@cineadois.local` automaticamente — vocês só digitam o username.
